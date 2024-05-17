@@ -64,6 +64,7 @@ RX to 18 (Tx1)
 #define MAX_CODE_LENGTH 4
 #define MAX_ATTEMPTS 3
 #define TIME_OUT 5000 // 5 seconds
+#define MAX_UNLOCK_TIME 10000 // 10 seconds
 #define LOCK_OUT_TIME 20000 // 20 seconds
 #define PASSCODE "1919"
 #define AUTHENTICATED_PASSCODE "1234"
@@ -188,11 +189,14 @@ String inputSecretCode() {
 }
 
 void doorUnlockedLogic() {
+  unsigned long unlockTime = millis();
   displayUnlockedStateOnLED();
   auto key = keypad.getKey();
   while (key != 'C') {
     if (newCommandReceived)
       return;
+    if (millis() - unlockTime > MAX_UNLOCK_TIME)
+      break;
     key = keypad.getKey();
   }
   lock();
@@ -222,44 +226,46 @@ void doorLockedLogic() {
 }
 
 void parseCommand(){
-  if (authenticatedState == AuthenticatedState::UNAUTHENTICATED){
-    if (command == "login") {
-      sendStringSerial1("Enter passcode");
-      authenticatedState = AuthenticatedState::LOGIN;
-    } else {
-      sendStringSerial1("Access Denied");
-    }
-  } else if (authenticatedState == AuthenticatedState::LOGIN) {
-    if (command == AUTHENTICATED_PASSCODE) {
-      sendStringSerial1("Authenticated");
-      authenticatedState = AuthenticatedState::AUTHENTICATED;
-    } else {
-      sendStringSerial1("Access Denied");
-      authenticatedState = AuthenticatedState::UNAUTHENTICATED;
-    }
-  } else if (authenticatedState == AuthenticatedState::AUTHENTICATED){
-    if (command == "state") {
-      if (doorState.locked()){
-        sendStringSerial1("Locked");
+  switch (authenticatedState) {
+    case AuthenticatedState::UNAUTHENTICATED:
+      if (command == "login") {
+        sendStringSerial1("Enter passcode");
+        authenticatedState = AuthenticatedState::LOGIN;
       } else {
-        sendStringSerial1("Unlocked");
+        sendStringSerial1("Access Denied");
       }
-    } else if (command == "lock") {
-      lock();
-    } else if (command == "unlock") {
-      doorState.unlock(PASSCODE);
-      unlock();
-    } else if (command == "code") {
-      String newCode = command.substring(4, 8);
-      doorState.setCode(newCode);
-      sendStringSerial1("Code set to: " + newCode);
-      Serial.println("Setting new passcode");
-    } else if (command == "logout"){
-      authenticatedState = AuthenticatedState::UNAUTHENTICATED;
-      sendStringSerial1("Logged out");
-    } else {
-      sendStringSerial1("Invalid command");
-    }
+      break;
+
+    case AuthenticatedState::LOGIN:
+      if (command == AUTHENTICATED_PASSCODE) {
+        sendStringSerial1("Authenticated");
+        authenticatedState = AuthenticatedState::AUTHENTICATED;
+      } else {
+        sendStringSerial1("Access Denied");
+        authenticatedState = AuthenticatedState::UNAUTHENTICATED;
+      }
+      break;
+
+    case AuthenticatedState::AUTHENTICATED:
+      if (command == "state") {
+        sendStringSerial1(doorState.locked() ? "Locked" : "Unlocked");
+      } else if (command == "lock") {
+        lock();
+      } else if (command == "unlock") {
+        doorState.unlock(PASSCODE);
+        unlock();
+      } else if (command.startsWith("code") && command.length() == 8){
+        String newCode = command.substring(4, 8);
+        doorState.setCode(newCode);
+        sendStringSerial1("Code set to: " + newCode);
+        Serial.println("Setting new passcode");
+      } else if (command == "logout") {
+        authenticatedState = AuthenticatedState::UNAUTHENTICATED;
+        sendStringSerial1("Logged out");
+      } else {
+        sendStringSerial1("Invalid command");
+      }
+      break;
   }
   command = "";
 }
