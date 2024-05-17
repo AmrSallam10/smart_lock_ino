@@ -76,7 +76,8 @@ const int lockUnlockNoteDuration = 200;
 const int alarmNoteDuration = 1000;
 
 volatile String command = "";
-volatile bool userMode = true;
+volatile bool newCommandReceived = false;
+volatile char receivedChar;
 
 int attempts = 0;
 
@@ -165,7 +166,7 @@ void displayAlartStateOnLED() {
 String inputSecretCode() {
   String result = "";
   unsigned long lastKeyPressTime = 0;
-  while (userMode && result.length() < 4) {
+  while (!newCommandReceived && result.length() < 4) {
     char key = keypad.getKey();
     if (key != NO_KEY) {
       if (result.length() == 0) {
@@ -188,7 +189,7 @@ void doorUnlockedLogic() {
   displayUnlockedStateOnLED();
   auto key = keypad.getKey();
   while (key != 'C') {
-    if (!userMode)
+    if (newCommandReceived)
       return;
     key = keypad.getKey();
   }
@@ -199,7 +200,7 @@ void doorLockedLogic() {
   displayLockedStateOnLED();
 
   String userCode = inputSecretCode();
-  if (userMode){
+  if (!newCommandReceived){
     bool unlockedSuccessfully = doorState.unlock(userCode);
     delay(200);
     if (unlockedSuccessfully) {
@@ -235,21 +236,18 @@ void parseCommand(){
     doorState.setCode(newCode);
     sendStringSerial1("Code set to: " + newCode);
     Serial.println("Setting new passcode");
-  } 
+  } else {
+        sendStringSerial1("Invalid command");
+  }
   command = "";
 }
 
 ISR(USART1_RX_vect) {
-    char receivedChar = UDR1;  // Read the incoming byte
-    command += receivedChar;
-    Serial.print(receivedChar);
-
-    if (command.startsWith("state") || command.startsWith("lock") || command.startsWith("unlock") || 
-                                            (command.startsWith("code") && command.length() == 8)) {
-      Serial.print('\n');
-      userMode = false;
-    } else if (receivedChar == '\n') {
-        command = ""; 
+    receivedChar = UDR1;  // Read the incoming byte
+    if (receivedChar == '\n') {
+      newCommandReceived = true;
+    } else {
+      command += receivedChar;
     }
 }
 
@@ -304,14 +302,13 @@ void setup() {
 }
 
 void loop() {
-  if (userMode){
-    if (doorState.locked()) {
-      doorLockedLogic();
-    } else {
-      doorUnlockedLogic();
-    }
-  } else {
+  if (newCommandReceived){
     parseCommand();
-    userMode = true;
+    newCommandReceived = false;
+  } else {
+    if (doorState.locked())
+      doorLockedLogic();
+    else 
+      doorUnlockedLogic();
   }
 }
